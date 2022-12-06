@@ -1,0 +1,202 @@
+---
+title: "Omnipath Query"
+author: "Daniele Capocefalo"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd('/group/testa/Users/daniele.capocefalo/brainomics2022') #change this to /group/brainomics2022/Day5/singlecell_grn
+```
+
+# Get Knowledge-Base derived GRNs from Omnipath (R) and dynamically visualize networks
+
+## Introduction
+
+In this lecture, we will attempt to estimate Transcription Factor Activity from [a high-quality single-cell RNASeq Transcriptomic Data of Human Neocortical Development during Mid-gestation](https://www.sciencedirect.com/science/article/pii/S0896627319305616?via%3Dihub).
+
+To Do so, we will first retrieve high quality data of Gene Regulatory Networks available in literature through [OmniPathDB](https://omnipathdb.org/) ([here](https://www.nature.com/articles/nmeth.4077) the link to the main paper).
+
+OmniPath is a database that stores several molecular biology information of different types from a plethora of databases, from protein-interaction to gene annotation. It has both an [R](https://www.bioconductor.org/packages/release/bioc/html/OmnipathR.html) and a [python](https://github.com/saezlab/pypath) interface.
+
+For this tutorial, we will use the R version (mainly because `pypath`, the python interface, requires a different python version that the one installed during this course), but I recommend you go check their python interface if interested. in using it for your research questions :).
+
+-   We will first use `OmnipathR` to query a database of high quality, manually curated TF -\> Target interactions, also developed by the Saez-Rodriguez Lab: [DoRoTHea](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-020-1949-z).
+
+-   To enrich our regulons, We will add other TF -\> Target pairs from [SIGNOR](https://signor.uniroma2.it/), another database storing manualy curated TF -\> Target pairs
+
+-   We will graphically visualize a couple of relevant regulons to check the contributions of each database to the regulons.
+
+-   We will then use these knowledge-base networks derived in DoRothea to check how these networks can be used toc infer TF activity with [DecoupleR](https://saezlab.github.io/decoupleR/), and how the activity of some relevant regulons can be compared to GRNs that were derived directly from the expression dataset (in the next notebook)
+
+### Load Libraries
+
+```{r}
+library(OmnipathR)
+library(tidyr)
+library(dplyr)
+library(stringr)
+# we also install the visNetwork package for visualizing our Gene regulatory networks later on since we don't have cytoscape
+#install.packages('visNetwork') to be installed  during the course
+library(visNetwork)
+library(tibble)
+```
+
+## Build a Regulon Activity Dataset with OmniPath
+
+Omnipath stores several databases that can be used for several purposes, from general annotation to gathering insights on your sequencing data.
+
+For example, we can use it to rebuold protein-protein interactions across all the proteins that are expressed in a given scRNA-Seq cluster
+
+Here's a quick overview of all the databases that are indexed by the OmniPath Team:
+
+[![Omnipath databases available to date](https://static.omnipathdb.org/pypath_overview.png)](anchor%20link)
+
+we can also check all the available database by doing:
+
+```{r}
+# all interaction resources
+tibble(get_interaction_resources(dataset = NULL))
+
+# all annotations
+tibble(get_annotation_resources(dataset = NULL))
+
+```
+
+The website also offer a set of workflows to give you an idea of the potential of using a comprehensive knowledge base, [check this page](https://workflows.omnipathdb.org/) for more details (outside the scope of this lecture)
+
+### Load TFs annotation
+
+We first load through Omnipath a comprehensive, manually curated annotation of human TFs using the [TF Census Dataset](https://saezlab.github.io/OmnipathR/reference/tfcensus_download.html) and save it to retain only TFs that are fully reliable.
+
+```{r}
+tfs <- tfcensus_download() 
+# let's parse the table a little bit
+names(tfs) <- gsub(" ", "_", names(tfs))
+tfs <- tfs %>% distinct(HGNC_symbol) #remove duplicated TYF names or suprious anotations
+tfs
+write.table(tfs, file = 'data/TFCensus_human.tsv', sep = '\t', row.names = F, quote = F)
+```
+
+### Retrieve TF Target interaction of high quality from DoRothEA
+
+DoRothEA contains a list of several TF -\> Target interactions. All these interactions are assigned a confidence level that goes from **A** (very high quality TF-\> Target interactions) to **E** (poorly annotated interaction)
+
+We want to retain the highest amount of information possible while pruning the possible 'faux' interactions, i.e., gene regulatory relationships that has been proven only by one paper or by high-throughput sequencing. Let's query omnipath with the `import_dorothea_interactions` method
+
+```{r, echo = F}
+dorothea <- tibble(import_dorothea_interactions(resources = NULL,organism = 9606, dorothea_levels = c("A", "B", "C")))
+
+#let's explore the query
+dorothea
+
+```
+
+We want to retain only direct TF -\> Target interaction (`is_directed` column must be 1) and retain only interactions that have a consensus across the different sources that were used to curate the annotation
+
+We also remove some columns and put a `1` whether the interaction is a stimulation and `-1` if the direction is an inhibition Let's go!
+
+```{r}
+dorothea_filtered <- dorothea %>% filter(is_directed == 1, consensus_direction ==1)  %>% mutate(regulation = case_when(is_inhibition == 1 ~ -1, is_stimulation == 1 ~ 1)) %>% filter(source_genesymbol %in% tfs$HGNC_symbol) %>% select(source_genesymbol, target_genesymbol, regulation) %>% mutate(source = 'dorothea')
+dorothea_filtered
+# save the dataframe 
+write.table(dorothea_filtered, 'data/dorothea_filtered.tsv', quote =  F, sep = '\t', row.names = F)
+```
+
+### Query SIGNOR
+
+[SIGNOR](https://signor.uniroma2.it/) is a database that stores manually curated causal relationships across proteins of different organisms. Among these relationships, there are also regulatory interactions we might want to add to our database.
+
+We can query Omnipath and retrieve such interactions as follows:
+
+```{r}
+signor <- tibble(import_all_interactions(resources = c('SIGNOR'),organism = 9606))
+signor
+```
+
+As before, let's filter the dataset and produce a cleaned table
+
+```{r}
+signor_filtered <- signor %>% filter(is_directed == 1, consensus_direction ==1)  %>% mutate(regulation = case_when(is_inhibition == 1 ~ -1, is_stimulation == 1 ~ 1)) %>% filter(source_genesymbol %in% tfs$HGNC_symbol) %>% select(source_genesymbol, target_genesymbol, regulation) %>% mutate(source = 'SIGNOR')
+signor_filtered
+# save the dataframe 
+write.table(signor_filtered, 'data/signor_filtered.tsv', quote =  F, sep = '\t', row.names = F)
+```
+
+### Create a common regulon dataframe
+
+We merge now the two dataframes and add a small tag to understand how many TfF -\> Target pairs are preserved across the two databases
+
+```{r}
+regulons <- bind_rows(dorothea_filtered, signor_filtered)
+
+#if two interactors of a regulon appears, add a 'common' tag
+regulons_filtered <- regulons %>% group_by(source_genesymbol, target_genesymbol) %>% mutate(source = replace(source, n_distinct(source) > 1, 'both')) %>% filter(source == max(source)) %>% distinct() %>% arrange(source_genesymbol, target_genesymbol) %>% filter(str_count(target_genesymbol, "_") < 1) %>% ungroup()
+
+regulons_filtered  
+# count the number of unique and common regulons
+table(regulons_filtered$source)
+write.table(regulons_filtered, 'data/regulons_human.tsv', sep = '\t', row.names = F, quote = F)
+```
+
+### Investigate our knwledge-base GRN understand how Relevant Regulons in Neuron Differentiation are present
+
+Let's now visualize some of these regulons with the [visNetwork](https://datastorm-open.github.io/visNetwork/) package.
+
+We first load a handful of Relevant TFs that we know having some involvement in different cell populations
+
+```{r}
+relevant_tfs <- tibble(population = c(rep('Progenitor', 3), rep('Immature_Excitatory', 4), rep('Excitatory_Neurons', 4)), TF = c('PAX6', 'FOS', 'SOX2', 'EOMES', 'ETV2', 'ETV3', 'ETV4', 'BLC11A', 'BCL11B', 'CUX1', 'CUX2'))
+relevant_tfs
+#write.table(relevant_tfs, 'data/Fetal_Brain_TFs.tsv', sep = '\t', quote = F, row.names = F)
+```
+
+How many of these regulons are in our knowledge base regulatory network? how many targets do they have?
+
+```{r}
+relevant_regulons <- regulons_filtered %>% filter(source_genesymbol %in% relevant_tfs$TF)
+relevant_regulons %>% group_by(source_genesymbol) %>% count()
+
+```
+
+We can see that , with the exception of FOS, that is a well-studied TF involved in cell proliferation and differentiation, there is not so much information on the TFs we are looking for.
+
+Let's see now how they are related to each other by drawing the network of these regulons
+
+```{r}
+# create node dataframe and add customizartion
+sources <- relevant_regulons %>% distinct(source_genesymbol) %>% rename(label = source_genesymbol)
+destinations <- relevant_regulons %>% distinct(target_genesymbol) %>% rename(label = target_genesymbol)
+nodes <- full_join(sources, destinations, by = "label")
+nodes <- rowid_to_column(nodes, "id")
+nodes_viz <- nodes %>% mutate(shape = if_else(label %in% relevant_regulons$source_genesymbol, 'diamond', 'circle')) %>% mutate(color = if_else(label %in% relevant_regulons$source_genesymbol, 'red', 'lightgreen')) 
+nodes_viz
+```
+
+
+```{r}
+#add edges customization
+per_route <- relevant_regulons %>% rename(weight = regulation) %>% mutate(color = case_when(source == 'SIGNOR' ~ 'red', source == 'dorothea' ~ 'green', source == 'both' ~ 'blue')) %>% mutate(arrows = 'to') %>% mutate(dashes = ifelse(weight > 0, FALSE, TRUE))
+per_route
+
+edges <- per_route %>%
+  left_join(nodes, by = c("source_genesymbol" = "label")) %>%
+  rename(from = id)
+
+edges <- edges %>%
+  left_join(nodes, by = c("target_genesymbol" = "label")) %>%
+  rename(to = id)
+```
+
+
+```{r}
+visNetwork(nodes_viz, edges, width = "100%", height = 750 ) %>% visOptions(highlightNearest = TRUE) %>%   addFontAwesome() %>% visLegend(useGroups = F,addNodes = data.frame(label = c('TF', 'Target'), shape = c('diamond', 'circle'), color = c('red', 'lightgreen')), addEdges = data.frame(label = c('dorothea', 'SIGNOR', 'both', 'activation', 'inhibition'), color = c('green', 'red', 'blue', 'black', 'black'), dashes = c(FALSE, FALSE, FALSE, FALSE, TRUE)))
+```
+
+What does this network tell us?
+
+
+Let's export the dataset
+```{r}
+write.table(relevant_regulons, 'data/human_relevant_regulons.tsv', sep = '\t', quote = F, row.names = F)
+```

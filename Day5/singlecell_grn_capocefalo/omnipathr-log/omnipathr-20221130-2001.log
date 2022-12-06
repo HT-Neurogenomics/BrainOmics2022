@@ -1,0 +1,13 @@
+[2022-11-30 20:01:24] [INFO]    [OmnipathR] Welcome to OmnipathR!
+[2022-11-30 20:01:24] [INFO]    [OmnipathR] Initialized cache: `/group/testa/Users/daniele.capocefalo/.cache/OmnipathR`.
+[2022-11-30 20:01:44] [INFO]    [OmnipathR] Welcome to OmnipathR!
+[2022-11-30 20:01:44] [INFO]    [OmnipathR] Initialized cache: `/group/testa/Users/daniele.capocefalo/.cache/OmnipathR`.
+[2022-11-30 20:01:46] [TRACE]   [OmnipathR] Looking up in cache: `https://static-content.springer.com/esm/art%3A10.1038%2Fnrg2538/MediaObjects/41576_2009_BFnrg2538_MOESM6_ESM.txt`.
+[2022-11-30 20:01:46] [TRACE]   [OmnipathR] Loaded data from RDS `/group/testa/Users/daniele.capocefalo/.cache/OmnipathR/c36e2a3cf4ebcaf5e345791be4cbd2eeb374ddf8-1.rds`.
+[2022-11-30 20:01:46] [SUCCESS] [OmnipathR] TF census (static-content.springer.com): loaded 1987 records from cache
+[2022-11-30 20:01:46] [TRACE]   [OmnipathR] Loaded data from RDS `/group/testa/Users/daniele.capocefalo/.cache/OmnipathR/4243c45a62b248b5f5e02b911f6e1a480f5a67ba-1.rds`.
+[2022-11-30 20:01:46] [INFO]    [OmnipathR] Loaded from cache: `https://omnipathdb.org/interactions?genesymbols=yes&datasets=dorothea&organisms=9606&dorothea_levels=A,B,C&fields=sources,references,curation_effort,dorothea_level&license=academic`
+[2022-11-30 20:01:46] [SUCCESS] [OmnipathR] Loaded 32519 interactions from cache.
+[2022-11-30 20:01:47] [TRACE]   [OmnipathR] Loaded data from RDS `/group/testa/Users/daniele.capocefalo/.cache/OmnipathR/f8e30d0beb56d79dbf3fff0cc53913543a82a65d-1.rds`.
+[2022-11-30 20:01:47] [INFO]    [OmnipathR] Loaded from cache: `https://omnipathdb.org/interactions?genesymbols=yes&resources=SIGNOR&datasets=dorothea,kinaseextra,ligrecextra,lncrna_mrna,mirnatarget,omnipath,pathwayextra,small_molecule,tf_mirna,tf_target,tfregulons&organisms=9606&dorothea_levels=A,B&fields=type,dorothea_level,sources,references,curation_effort&license=academic`
+[2022-11-30 20:01:47] [SUCCESS] [OmnipathR] Loaded 14186 interactions from cache.

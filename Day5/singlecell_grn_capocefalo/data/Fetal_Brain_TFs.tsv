@@ -1,0 +1,12 @@
+population	TF
+Progenitor	PAX6
+Progenitor	FOS
+Progenitor	SOX2
+Immature_Excitatory	EOMES
+Immature_Excitatory	ETV2
+Immature_Excitatory	ETV3
+Immature_Excitatory	ETV4
+Excitatory_Neurons	BCL11A
+Excitatory_Neurons	BCL11B
+Excitatory_Neurons	CUX1
+Excitatory_Neurons	CUX2
