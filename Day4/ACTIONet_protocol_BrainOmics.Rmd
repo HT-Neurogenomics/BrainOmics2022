@@ -1,0 +1,794 @@
+---
+title: "Basic protocols for single-cell transcriptomic analysis with ACTIONet"
+output: html_document
+date: "2022-11-17"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Datasets
+
+-   huCtx: human prefrontal cortex scRNA-seq from @Lake2018
+-   mCtx: mouse prefrontal cortex scRNA-seq data from @ding2020
+-   jointHuCtx: human prefrontal cortex scRNA-seq data compiled from @velmeshev2019 @schirmer2019 @mathys2019 @Lake2018
+-   simStates: simulated scRNA-seq data from @kotliar2019
+-   bOrg: scRNA-seq human brain organoid data from Kanton2019
+
+## Procedure 1: Multiresolution network-based analysis
+
+In this procedure we use the **huCtx dataset** to demonstrate how to do exploratory analysis and annotate cells with ACTIONet.
+
+### Stage I: Data preprocessing
+
+we first load the package.
+
+```{r load ACTIONet, message=FALSE, warning=FALSE}
+require(ACTIONet)
+```
+
+we load the input data from a preexisting ace object.
+
+```{r input data}
+input_dir <- "/group/davila/ACTIONet_Dataset/"
+huCtx <- readRDS(file.path(input_dir, "huCtx.ace.rds"))
+```
+
+let's look at the ace object
+
+```{r}
+huCtx
+```
+
+```{r}
+rowData(huCtx)
+```
+
+we apply normalization to account to differences in sequencing depth (by default log transformed and depth adjusted values).
+
+```{r normalization}
+huCtx <- normalize.ace(huCtx)
+```
+
+normalized data is added as logcounts assay
+
+```{r}
+huCtx
+```
+
+we apply dimensionality reduction to represent cells in a lower-dimensional space (by default 50 dimensions).
+
+```{r dimensionality reduction, message=FALSE, warning=FALSE}
+huCtx <- reduce.ace(huCtx)
+```
+
+lower-dimensional representation is added as a colMaps
+
+```{r}
+huCtx
+```
+
+```{r}
+head(colMaps(huCtx)[["ACTION"]])
+```
+
+#### EXTRA input functionality
+
+Note: to load data from pre-existing count and metadata files you can use
+
+```{r input data opt2, eval=FALSE}
+huCtx_counts <-  readRDS(file.path(input_dir, "huCtx_rawcounts.rds"))
+huCtx_cellmetadata <-  readRDS(file.path(input_dir, "huCtx_cellmetadata.rds"))
+huCtx_extra <- ACTIONetExperiment(assays=list(counts=huCtx_counts), colData=huCtx_cellmetadata)
+```
+
+Note: In case we wish to load data directly from CellRanger output files you can use
+Change <your-path-of-data> with your own data
+
+```{r input data opt3, eval=FALSE}
+ace <- import.ace.from.10X(input_path = "/<your-path-of-data>/")
+```
+
+### Stage II: Data decomposition and network construction
+
+we run ACTIONet's main function to decompose data in terms of patterns at multiple resolutions and build a cell network.
+
+```{r decomposition and network construction, message=FALSE, warning=FALSE}
+huCtx <- runACTIONet(huCtx)
+```
+
+cell network is added as colNet
+
+```{r}
+huCtx
+```
+
+decomposition output is added as colMaps
+
+```{r}
+names(huCtx@colMaps)
+
+head(colNets(huCtx)[["ACTIONet"]])[,1:10]
+```
+
+### Stage III: ACTIONet visualization and qualitative analysis
+
+let's visualize the cells in 2D
+
+```{r}
+plot.ACTIONet(huCtx)
+```
+
+let's visualize the cells in 2D adding network centrality scores
+
+```{r}
+plot.ACTIONet(huCtx, trans_attr = huCtx$node_centrality)
+```
+
+let's make it interactive
+
+```{r}
+plot.ACTIONet.interactive(huCtx)
+```
+
+let's explore the cell landscape in 3D
+
+```{r}
+plot.ACTIONet.interactive(huCtx, plot_3d = TRUE)
+```
+
+let's explore patterns of marker gene expression
+
+```{r}
+visualize.markers(ace = huCtx, markers = c("AQP4", "SLC17A7", "GAD1", "CSF1R", "PLP1", "PDGFRA"))
+```
+
+### Stage IV: clustering and cell group annotation
+
+Single-cell data is most commonly analyzed using clustering [@Luecken2019]. The goal is to define disjoint groups of transcriptionally similar cells under the assumption that these might recover distinct cell types, subtypes, or functionally relevant "states". ACTIONet is equipped with network-based tools to facilitate this type of analysis.
+
+we cluster cells to partition the cell network into well-connected communities (by default using the leiden graph-clustering algorithm [@Traag2019])
+
+```{r clustering}
+huCtx <- clusterCells(huCtx, cluster_name = "new_cluster")
+```
+
+cluster membership is added as metdata column
+
+```{r}
+table(huCtx$new_cluster)
+colData(huCtx)
+```
+
+let's visualize cells labeled by cluster membership
+
+```{r}
+plot.ACTIONet(huCtx, label_attr = huCtx$new_cluster, trans_attr = huCtx$node_centrality)
+```
+
+```{r}
+plot.ACTIONet.interactive(huCtx, label_attr = huCtx$new_cluster, plot_3d = TRUE)
+```
+
+what genes are preferentially expressed in each cluster?
+
+by default expression specificity scores are automatically computed per cluster and added as rowMap
+
+```{r}
+rowMaps(huCtx)
+head(huCtx$new_cluster_feature_specificity)
+```
+
+```{r}
+plot.top.k.features(scale(huCtx$new_cluster_feature_specificity), top_features = 5,row.title = 'Genes',column.title = 'Archetypes')
+```
+
+let's verify preferential expression
+
+```{r}
+visualize.markers(ace = huCtx, markers = c("CTNNA3", "ST18", "DOCK8", "GRIK1", "PLP1"))
+```
+
+ACTIONet includes multiple ways to compute preferential/differential expression
+
+```{r}
+x <- computeGeneSpecifity.wilcoxon(ace = huCtx, f = as.factor(huCtx$new_cluster), out_name = "new_clust")
+plot.top.k.features(x$new_clust_feature_specificity_wilcox, top_features = 5,row.title = 'Genes',column.title = 'Archetypes')
+```
+
+### Stage V: Cell annotation
+
+#### cluster-based annotation
+
+We can use prior knowledge to interpret the biological meaning of uncovered cell groups. Testing whether known marker genes are enriched among the genes that discriminate a cluster from the others is one straightforward way to do this. ACTIONet includes simple annotation functions to facilitate this analysis.
+
+let's test if we can use the following cell type marker genes to help interpret the clusters
+
+```{r}
+huCortex_celltype_markers <- list(
+  Ex=c("SLC17A7", "CAMK2A","CHN1","SV2B","NRGN"),
+  In=c("GAD1", "GAD2", "SLC32A1"),
+  Ast=c("GFAP", "AQP4", "SLC4A4"),
+  Oli=c("PLP1", "MBP", "MOBP", "MOG"),
+  Mic=c("CSF1R", "CD74", "P2RY12"),
+  Opc=c("OLIG1", "OLIG2", "PDGFRA", "SOX10", "APOD"),
+  Endo=c("ATP10A", "CLDN5", "FLT1", "VWF"),
+  Per=c("PTH1R", "SLC6A12", "SLC19A1", "COLEC12", "SLC12A7")
+)
+```
+
+We can easily test enrichment and infer best-matching cell type labels for the clusters using one function
+
+```{r}
+cluster_celltype_annotation <- annotateClusters(ace = huCtx, markers = huCortex_celltype_markers, cluster_name = "new_cluster")
+```
+
+the annotation function retrieves best-matching labels, confidence scores (highest enrichment score across cell types per cluster), and enrichment scores
+
+```{r}
+cluster_celltype_annotation
+```
+
+let's plot the enrichment scores
+
+```{r}
+Heatmap(cluster_celltype_annotation$Enrichment, col=blues9, rect_gp = gpar(col = "black"), row_title = "cluster", column_title = "cell type", name="enrichment")
+```
+
+let's assign and visualize cell labels based on cluster annotations
+
+```{r}
+huCtx$cluster_celltype_annotation <- cluster_celltype_annotation$Label[huCtx$new_cluster]
+
+plot.ACTIONet(huCtx, label_attr = huCtx$cluster_celltype_annotation, trans_attr = huCtx$node_centrality)
+```
+
+#### Individual cell scoring and annotation
+
+An alternative, cluster-independent approach to interpret cells using prior knowledge is by estimating single cell level scores by aggregating gene set expression values. ACTIONet includes functions to scores cells for several competing gene sets. Best-matching gene set associations can then be estimated for each cell.
+
+Here we use cell type markers as gene sets.
+
+let's again estimate cell type labels, but this time at single cell level
+
+```{r}
+cell_celltype_annotation <- annotateCells(huCtx, huCortex_celltype_markers)
+```
+
+be aware that *annotateCells* will retrieve best-matching labels, confidence scores, and enrichment scores at the cell level. These results are thus likely to be stored in large vectors and matrices; it is not a good idea to display them on screen in their entirety.
+
+::: callout-note
+Similar to the other annotation functions, *annotateCells* will retrieve best-matching labels, confidence scores, and enrichment scores. However, that annotations will be estimated at cell level, and thus are likely to result in large vectors and matrices. It is best not to try to display all annotations on screen.
+:::
+
+let's see how the estimated best-matching labels distribute across cell types
+
+```{r}
+plot(table(cell_celltype_annotation$Label), ylab="cell count", xlab="cell type")
+```
+
+The enrichment scores are now computed for each single cell. Let's see the scores of the top cells
+
+```{r}
+head(cell_celltype_annotation$Enrichment)
+```
+
+Similar to mapping expression values of a single marker gene (see *visualize.markers*), we can also project these gene set enrichment scores across the cells.
+
+ACTIONet includes a function to facilitate the mapping of quantitative scores to the 2D cell space.
+
+let's see how cell type enrichment scores map to cells for Excitatory neurons (Ex), Inhibitory neurons (In), and Astrocytes (Ast).
+
+```{r}
+plot.ACTIONet.gradient(huCtx, x = cell_celltype_annotation$Enrichment[,"Ex"])
+
+plot.ACTIONet.gradient(huCtx, x = cell_celltype_annotation$Enrichment[,"In"])
+
+plot.ACTIONet.gradient(huCtx, x = cell_celltype_annotation$Enrichment[,"Ast"])
+```
+
+let's now visualize the cell type labels estimated based on these cell level enrichment scores
+
+```{r}
+plot.ACTIONet(huCtx, cell_celltype_annotation$Label, trans_attr = huCtx$node_centrality)
+```
+
+```{r}
+plot(table(cell_celltype_annotation$Label), ylab="cell count", xlab="cell type")
+```
+
+```{r}
+plot.ACTIONet.interactive(huCtx, label_attr = cell_celltype_annotation$Label, plot_3d = TRUE)
+```
+
+Cluster-based and cell-based annotation and highly consistent in this case. However, because lowly abundant non-neuronal cell types tend to cluster together sometimes, cell level annotations helped disentangling the cell identities of microglia, perycites, and endothelial cells.
+
+## Procedure 2: Integrative analysis of single-cell transcriptomic datasets
+
+### Stage I: Dimensionality reduction and batch-correction
+
+we load the input data from a pre-existing ace object.
+
+```{r}
+mCtx <- readRDS(file.path(input_dir, "mCtx.ace.rds"))
+```
+
+```{r extra stuff}
+L <- lapply(unique(mCtx$Method), function(i) mCtx[,mCtx$Method==i])
+names(L) <- unique(mCtx$Method)
+LL <- cbind(L$`Smart-seq2`, L$`10x Chromium`)
+L <- do.call(cbind, L)
+
+WMYW <- counts(mCtx)
+```
+
+```{r extra stuff 2}
+ace <- ACTIONetExperiment(assays=list(counts=WMYW))
+ace@colData <- mCtx@colData
+```
+
+check number of cells from each sample profiled using each technology
+
+```{r}
+table(mCtx$Method, mCtx$Experiment)
+table(mCtx$Method)
+```
+
+run normal ACTIONet analysis using all data
+
+```{r}
+mCtx <- normalize.ace(mCtx)
+mCtx <- reduce.ace(mCtx)
+mCtx <- runACTIONet(mCtx)
+```
+
+let's see plot the cells labeling experiment and method
+
+```{r}
+plot.ACTIONet(mCtx, mCtx$Method)
+plot.ACTIONet(mCtx, mCtx$Experiment)
+plot.ACTIONet(mCtx, mCtx$CellType)
+```
+Let's remove the batch effect from the data
+```{r}
+mCtx <- normalize.ace(mCtx)
+mCtx <- reduce.and.batch.correct.ace.Harmony(mCtx, batch_attr = mCtx$Method)
+mCtx <- runACTIONet(mCtx)
+
+```
+
+let's integrate using batch correction
+
+```{r}
+mCtx.corrected <- batch.correct.ace.Harmony(ace = mCtx, batch_attr = mCtx$Method)
+dim(colMaps(mCtx.corrected)[["Harmony"]])
+
+mCtx.corrected <- runACTIONet(mCtx.corrected)
+```
+
+```{r}
+plot.ACTIONet(mCtx.corrected, mCtx.corrected$Method)
+plot.ACTIONet(mCtx.corrected, mCtx.corrected$Experiment)
+plot.ACTIONet(mCtx.corrected, mCtx.corrected$CellType)
+```
+
+```{r}
+BatchInt <- paste(mCtx$Method, mCtx$Experiment, sep="-")
+table(BatchInt)
+
+#mCtx <- normalize.ace(mCtx)
+mCtx.BI <- reduce.and.batch.correct.ace.Harmony(mCtx, batch_attr = BatchInt)
+mCtx.BI <- runACTIONet(mCtx.BI)
+
+plot.ACTIONet(mCtx.BI, mCtx.BI$Method)
+plot.ACTIONet(mCtx.BI, mCtx.BI$Experiment)
+plot.ACTIONet(mCtx.BI, mCtx.BI$CellType)
+```
+
+### Stage II: Integration of data from independent studies
+
+load multistudy human cortex data
+
+```{r}
+jointHuCtx <- readRDS(file.path(input_dir, "jointHuCtx.ace.rds"))
+```
+
+```{r}
+colData(jointHuCtx)
+table(jointHuCtx$study)
+table(jointHuCtx$cell.annotation)
+```
+
+check cell study distribution
+
+```{r}
+table(jointHuCtx$study)
+```
+
+run normal ACTIONet analysis using all data
+
+```{r}
+jointHuCtx <- normalize.ace(jointHuCtx)
+jointHuCtx <- reduce.ace(jointHuCtx)
+jointHuCtx <- runACTIONet(jointHuCtx)
+
+plot.ACTIONet(jointHuCtx, jointHuCtx$study)
+```
+
+```{r}
+visualize.markers(jointHuCtx, markers = c("OLIG2", "GAD1", "GFAP"))
+```
+
+let's now integrate, considering study labels
+
+```{r}
+jointHuCtx <- batch.correct.ace.Harmony(ace = jointHuCtx, batch_attr = jointHuCtx$study)
+jointHuCtx <- runACTIONet(jointHuCtx)
+
+plot.ACTIONet(jointHuCtx, jointHuCtx$study)
+```
+
+let's annotate all individual cells using the small set of reference markers
+
+```{r}
+joint_cell_celltype_annotation <- annotateCells(jointHuCtx, huCortex_celltype_markers)
+```
+
+```{r}
+plot.ACTIONet(jointHuCtx, joint_cell_celltype_annotation$Label, trans_attr = jointHuCtx$node_centrality)
+```
+
+```{r}
+plot(table(jointHuCtx$study, joint_cell_celltype_annotation$Label))
+Heatmap(table(jointHuCtx$study, joint_cell_celltype_annotation$Label)/sum(table(jointHuCtx$study, joint_cell_celltype_annotation$Label)))
+```
+
+#### Missing labels
+
+the column metadata includes labels reported for each study -- e.g., column keep.labs.Mathys maps the labels reported in Mathys et al. 2019 to the corresponding cells.
+
+```{r}
+head(jointHuCtx@colData)
+```
+
+For each study, labels will map to only 1/4 of the cells. Let's see how they look:
+
+```{r}
+plot.ACTIONet(jointHuCtx, jointHuCtx$keep.labs.Mathys, trans_attr = jointHuCtx$node_centrality)
+plot.ACTIONet(jointHuCtx, jointHuCtx$keep.labs.Lake, trans_attr = jointHuCtx$node_centrality)
+plot.ACTIONet(jointHuCtx, jointHuCtx$keep.labs.Schirmer, trans_attr = jointHuCtx$node_centrality)
+plot.ACTIONet(jointHuCtx, jointHuCtx$keep.labs.Velmeshev, trans_attr = jointHuCtx$node_centrality)
+```
+
+we can infer missing lables by propagating through the network.
+
+Let's first transfer labels from Mathys et al.
+
+```{r}
+InferredLabs <- infer.missing.cell.labels(jointHuCtx, label_attr = jointHuCtx@colData[,"keep.labs.Mathys"])
+
+head(InferredLabs)
+
+plot.ACTIONet(jointHuCtx, InferredLabs, trans_attr = jointHuCtx$node_centrality)
+```
+
+let's now transfer more detailed labels from other studies
+
+```{r}
+x <- names(jointHuCtx@colData)[grep("keep", names(jointHuCtx@colData))]
+O <- lapply(x, function(i) {
+     P1 <- plot.ACTIONet(jointHuCtx, label_attr = jointHuCtx@colData[,i], trans_attr = jointHuCtx$node_centrality)
+    P2 <- plot.ACTIONet(jointHuCtx, label_attr = infer.missing.cell.labels(jointHuCtx, label_attr = jointHuCtx@colData[,i]), trans_attr = jointHuCtx$node_centrality)  
+    return(ggpubr::ggarrange(P1, P2))
+  }
+)
+O
+```
+
+```{r}
+Lake.plus <- infer.missing.cell.labels(jointHuCtx, label_attr = jointHuCtx@colData$keep.labs.Lake)
+
+Velmeshev.plus <- infer.missing.cell.labels(jointHuCtx, label_attr = jointHuCtx@colData$keep.labs.Velmeshev)
+
+
+x <- table(Lake.plus, Velmeshev.plus)
+xx <- doubleNorm(apply(x, 2, as.numeric))
+rownames(xx) <- rownames(x)
+colnames(xx) <- colnames(x)
+Heatmap(xx, rect_gp = gpar(col = "black"))
+```
+
+## Procedure 3: ACTIONet's cell state analysis
+
+```{r}
+require(ACTIONet)
+```
+
+In this procedure we use the **simStates dataset** to demonstrate how to recover single-cell identity and activity states with ACTIONet.
+
+```{r input simStates}
+input_dir <- "/group/davila/ACTIONet_Dataset"
+simStates <- readRDS(file.path(input_dir, "simStates.ace.rds"))
+```
+
+```{r}
+table(simStates@colData$cluster)
+hist(simStates@colData$program.usage, 20)
+
+simStates@colData
+```
+
+run normal ACTIONet analysis
+
+```{r run ACTIONet analysis}
+simStates <- normalize.ace(simStates)
+simStates <- reduce.ace(simStates)
+simStates <- runACTIONet(simStates)
+```
+
+let's take a look at the cells
+
+```{r}
+plot.ACTIONet(simStates)
+```
+
+how simulated doublets look?
+
+```{r}
+plot.ACTIONet(simStates, simStates$is.doublet)
+```
+
+network centrality helps in identifying potentially problematic cells
+
+```{r}
+plot.ACTIONet(simStates, simStates$is.doublet, trans_attr = simStates$node_centrality)
+```
+
+```{r}
+boxplot(simStates$node_centrality~simStates$is.doublet)
+```
+
+### Identity states
+
+let's take a look at simulated identity states
+
+```{r}
+plot.ACTIONet(simStates, simStates$cluster, trans_attr = simStates$node_centrality)
+```
+
+### Activity state
+
+let's look at the activity program scores across cells
+
+```{r}
+plot.ACTIONet.gradient(simStates, simStates$program.usage)
+```
+
+How does the activity program compares to identities
+
+```{r}
+boxplot(simStates$program.usage~simStates$cluster, ylab="program usage", xlab="identity")
+```
+
+### Recovering identities and activities
+
+does clustering recover activity?
+
+```{r}
+simStates <- clusterCells(simStates, cluster_name = "new.cluster")
+simStates <- clusterCells(simStates, cluster_name = "new.cluster.hi", resolution_parameter = 1.5)
+
+simStates@colData
+```
+
+```{r}
+plot.ACTIONet(simStates, simStates$new.cluster)
+```
+
+Clustering recover Identity programs
+
+```{r}
+table(simStates$new.cluster.hi, simStates$cluster)
+Reordered <- table(simStates$new.cluster.hi, simStates$cluster)[,apply(table(simStates$new.cluster.hi, simStates$cluster), 1, which.max)]
+Reordered
+
+Heatmap(table(simStates$new.cluster.hi, simStates$cluster), cluster_rows = F, cluster_columns = F, col = blues9, rect_gp = gpar(col = "black"))
+```
+
+### ACTIONet decomposition recover identity and activity programs
+
+```{r}
+P <- plot.ACTIONet.archetype.footprint(simStates)
+ggpubr::ggarrange(plotlist = P)
+```
+
+How do archetype patterns compare to identity programs?
+
+let's compute enrichment of identity labels per archetype pattern
+
+```{r}
+o <- annotate.archetypes.using.labels(simStates, labels = simStates$cluster)
+oo <- annotate.archetypes.using.labels(simStates, labels = simStates$new.cluster)
+ooo <- annotate.archetypes.using.labels(simStates, labels = simStates$new.cluster.hi)
+
+o$Enrichment
+```
+
+```{r}
+Heatmap(o$Enrichment, rect_gp = gpar(col = "black")) + Heatmap(oo$Enrichment, rect_gp = gpar(col = "black")) + Heatmap(ooo$Enrichment, rect_gp = gpar(col = "black"))
+```
+
+let's reorder and plot
+
+```{r}
+Score <- o$Enrichment
+x <- (rowMax(Score)-max(rowMax(Score)))*-1
+x <- x/max(x)
+
+Score <- Score[order(x), names(sort(apply(Score[order(x),], 2, which.max)))]
+x <- x[order(x)]
+
+Anot <- DataFrame(do.call(rbind, strsplit(rownames(Score), "-")), x)
+names(Anot) <- c("patterns", "best.match", "unspecificity.score")
+
+Heatmap(Score, col=circlize::colorRamp2(breaks = c(min(Score), 0, max(Score)), colors = c("blue", "white", "red")), rect_gp = gpar(col = "black"), cluster_rows = F, cluster_columns = F, row_names_side = "left") + Heatmap(x[order(x)], rect_gp = gpar(col = "black"))
+```
+
+```{r}
+par(mfrow=c(2,1))
+boxplot(simStates$archetype_footprint[,3]~simStates$cluster)
+boxplot(simStates$archetype_footprint[,14]~simStates$cluster)
+```
+
+how does archetypes compare to the known activation program
+
+```{r}
+plot.ACTIONet.gradient(simStates, x = simStates$program.usage)
+```
+
+```{r}
+plot.ACTIONet.gradient(simStates, x = simStates$archetype_footprint[,14])
+```
+
+```{r}
+barplot(cor(simStates$program.usage, simStates$archetype_footprint), ylab="correlation")
+barplot(cor(simStates$program.usage, simStates$archetype_footprint), ylab="correlation")
+```
+
+```{r}
+simStates_ort <- simStates
+df <- as.matrix(simStates_ort$program.usage)
+simStates_ort <- reduce.and.batch.orthogonalize.ace(simStates_ort, design_mat = df)
+simStates_ort <- runACTIONet(simStates_ort, reduction_slot = "ACTION_ortho")
+
+plot.ACTIONet.interactive(simStates_ort, simStates_ort$cluster, plot_3d = T, trans_attr = simStates_ort$node_centrality)
+plot.ACTIONet(simStates_ort, simStates_ort$cluster)
+
+plot.ACTIONet(simStates, simStates_ort$cluster)
+```
+
+# Organoid example
+
+## organoids
+
+In this procedure we use ACTIONet on **organoids** data. The procedure is identical to the previous one.
+
+```{r}
+bOrg <- readRDS(file.path(input_dir, "bOrg.ace.rds"))
+```
+
+```{r}
+colData(bOrg)
+table(bOrg$Stage, bOrg$Line)
+table(bOrg$Line)
+```
+
+run normal ACTIONet analysis
+
+```{r}
+bOrg <- normalize.ace(bOrg)
+bOrg <- reduce.ace(bOrg)
+bOrg <- runACTIONet(bOrg)
+```
+
+```{r}
+plot.ACTIONet(bOrg)
+```
+
+```{r}
+plot.ACTIONet(bOrg, bOrg$Stage)
+```
+
+```{r}
+plot.ACTIONet(bOrg, bOrg$Line)
+```
+
+
+```{r}
+bOrg$Stage <- droplevels(bOrg$Stage)
+bOrg$PredCellType <- droplevels(bOrg$PredCellType)
+bOrg$cl_FullLineage <- droplevels(bOrg$cl_FullLineage)
+
+P <- plot.ACTIONet(bOrg, bOrg$Stage, label_text_size = 1.5)
+PP <- plot.ACTIONet(bOrg, bOrg$PredCellType, label_text_size = 1.5)
+PPP <- plot.ACTIONet(bOrg, bOrg$cl_FullLineage, label_text_size = 1.5)
+
+ggpubr::ggarrange(plotlist = list(P, PP, PPP))
+```
+
+let's look at the archetypal patterns
+
+```{r}
+P.orgs <- plot.ACTIONet.archetype.footprint(bOrg)
+ggpubr::ggarrange(plotlist = P.orgs)
+```
+
+let's annotate the archetypes using cell labels
+```{r}
+o <- annotate.archetypes.using.labels(bOrg, labels = bOrg$Stage)
+oo <- annotate.archetypes.using.labels(bOrg, labels = bOrg$PredCellType)
+ooo <- annotate.archetypes.using.labels(bOrg, labels = bOrg$cl_FullLineage)
+
+Heatmap(o$Enrichment) + Heatmap(oo$Enrichment) + Heatmap(ooo$Enrichment)
+```
+
+let's look to the profile and specifity (signatures) of archetypes
+
+```{r}
+dim(rowMaps(bOrg)[["unified_feature_profile"]]) 
+dim(rowMaps(bOrg)[["unified_feature_specificity"]])
+
+head(rowMaps(bOrg)[["unified_feature_profile"]])
+head(rowMaps(bOrg)[["unified_feature_specificity"]])
+
+sort(bOrg$unified_feature_specificity[,"A10"], decreasing = T)[1:20]
+
+
+Mat <- bOrg$unified_feature_specificity
+View(Mat)
+
+plot.top.k.features(scale(bOrg$unified_feature_specificity), top_features = 2, row.title = "Genes", column.title = "Archetypes")
+```
+
+example of how genesets can be used to interpret archetype patterns
+
+```{r}
+data("gProfilerDB_human")
+data("nanoStringDB_human")
+data("PanglaoDB_human_markers")
+
+head(gProfilerDB_human$SYMBOL$CORUM[,1:10])
+names(which(gProfilerDB_human$SYMBOL$`GO:BP`[,"autophagosome assembly"]>0))
+
+L <- lapply(colnames(gProfilerDB_human$SYMBOL$`GO:BP`)[1:50], function(i) names(which(gProfilerDB_human$SYMBOL$`GO:BP`[,i]>0)))
+names(L) <- colnames(gProfilerDB_human$SYMBOL$`GO:BP`)[1:50]
+
+dim(gProfilerDB_human$SYMBOL$REAC)
+xx <- annotate.archetypes.using.markers(bOrg, markers = gProfilerDB_human$SYMBOL$CORUM)
+rownames(xx$Enrichment) <- paste0("A", 1:nrow(xx$Enrichment))
+
+
+Heatmap(oo$Enrichment) + Heatmap(xx$Enrichment[,names(sort(colMeans(xx$Enrichment), decreasing = T))[1:10]])
+```
+
+we can project to the cells the enrichment matrix obtained by annotating archetypes
+
+```{r}
+dim(xx$Enrichment)
+E <- xx$Enrichment
+O <- ACTIONet::projectArchs(bOrg, E)
+
+OO <- ACTIONet::projectArchs(bOrg, oo$Enrichment)
+
+head(O$Enrichment)
+
+dim(O$Enrichment)
+colnames(O$Enrichment)
+
+plot.ACTIONet.gradient(bOrg, O$Enrichment[,"protein phosphatase 2A C-subunit-synapsin complex"])
+
+P <- lapply(colnames(OO$Enrichment), function(i) plot.ACTIONet.gradient(bOrg, OO$Enrichment[,i]))
+ggpubr::ggarrange(plotlist = P, labels = colnames(OO$Enrichment))
+
+```
