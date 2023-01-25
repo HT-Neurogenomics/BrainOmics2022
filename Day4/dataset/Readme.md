@@ -1,4 +1,6 @@
 Dataset used in the ACTIONet protocol
+
+The dataset used are:
 * huCtx: human prefrontal cortex scRNA-seq from Lake, B., Chen, S., Sos, B. et al. Integrative single-cell analysis of transcriptional and epigenetic states in the human adult brain. Nat Biotechnol 36, 70–80 (2018). https://doi.org/10.1038/nbt.4038
 * mCtx: mouse prefrontal cortex scRNA-seq data from Zhong, S., Ding, W., Sun, L. et al.  Decoding the development of the human hippocampus. Nature 577, 531–536 (2020). https://doi.org/10.1038/s41586-019-1917-5
 * jointHuCtx: human prefrontal cortex scRNA-seq data compiled from 
