@@ -15,7 +15,7 @@ Course Material of the Brainomics 2022 edition, created and developed by the [Ce
 
 ### Instructors
 
-- [Daniele Capocefalo](https://humantechnopole.it/en/people/daniele-capocefalo/) - Computational PostDoc, Testa Lab (GitHub: [wariobrega]())
+- [Daniele Capocefalo](https://humantechnopole.it/en/people/daniele-capocefalo/) - Computational PostDoc, Testa Lab (GitHub: [wariobrega](https://github.com/wariobrega))
 - [Emanuele Villa](https://humantechnopole.it/en/people/emanuele-villa/) - Staff Scientist, Testa Lab (GitHub: []())
 - [Alessandro Vitriolo](https://humantechnopole.it/en/people/alessandro-vitriolo/) - Computational PostDoc, Testa Lab (GitHub: []())
 - [Cristina Cheroni](https://humantechnopole.it/en/people/cristina-cheroni/) - Senior Manager CEREBRA Unit (GitHub: []())
